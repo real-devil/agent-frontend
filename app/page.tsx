@@ -1,239 +1,222 @@
-"use client";
+﻿"use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { ChatPanel } from "./components/chat-panel";
+import { DocumentSidebar } from "./components/document-sidebar";
+import { statusLabel, statusTone } from "./components/workflow-utils";
+import { WorkflowSidebar } from "./components/workflow-sidebar";
+import type { DocumentItem, Message, WorkflowState } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
-
-interface Document {
-  document_id: string;
-  filename: string;
-}
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [selectedDocId, setSelectedDocId] = useState<string>("");
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [selectedDocId, setSelectedDocId] = useState("");
   const [uploadError, setUploadError] = useState("");
+  const [sessionId, setSessionId] = useState("");
+  const [workflowState, setWorkflowState] = useState<WorkflowState | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    fetchDocuments();
+  const fetchDocuments = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/document/list`);
+      const data = await response.json();
+      setDocuments(data);
+      if (data.length > 0) {
+        setSelectedDocId((current) => current || data[0].document_id);
+      }
+    } catch {
+      // ignore document list failures here
+    }
   }, []);
+
+  const fetchWorkflowState = useCallback(async (activeSessionId: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/agent/state/${activeSessionId}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      setWorkflowState(data);
+    } catch {
+      // ignore polling failures so chat stays usable
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchDocuments();
+  }, [fetchDocuments]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function fetchDocuments() {
-    try {
-      const res = await fetch(`${API_BASE}/document/list`);
-      const data = await res.json();
-      setDocuments(data);
-      if (data.length > 0 && !selectedDocId) {
-        setSelectedDocId(data[0].document_id);
-      }
-    } catch {
-      // ignore
-    }
-  }
+  useEffect(() => {
+    if (!sessionId) return;
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    void fetchWorkflowState(sessionId);
+    const timer = setInterval(() => {
+      void fetchWorkflowState(sessionId);
+    }, 2500);
+
+    return () => clearInterval(timer);
+  }, [fetchWorkflowState, sessionId]);
+
+  async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
     if (!file) return;
+
     setUploadError("");
     setUploading(true);
+
     const formData = new FormData();
     formData.append("file", file);
+
     try {
-      const res = await fetch(`${API_BASE}/document/upload`, {
+      const response = await fetch(`${API_BASE}/document/upload`, {
         method: "POST",
         body: formData,
       });
-      if (!res.ok) {
-        const err = await res.json();
-        setUploadError(err.detail || "上传失败");
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        setUploadError(errorData.detail || "Upload failed.");
       } else {
         await fetchDocuments();
       }
     } catch {
-      setUploadError("网络错误，请检查后端是否启动");
+      setUploadError("Network error while uploading.");
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   }
 
   async function handleSend() {
     const text = input.trim();
     if (!text || loading) return;
+
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setMessages((previous) => [...previous, { role: "user", content: text }]);
     setLoading(true);
+
     try {
-      const res = await fetch(`${API_BASE}/chat/`, {
+      const response = await fetch(`${API_BASE}/chat/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
+          session_id: sessionId || null,
           document_id: selectedDocId || null,
         }),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: `错误：${err.detail || "请求失败"}` },
+
+      const data = await response.json();
+      if (!response.ok) {
+        setMessages((previous) => [
+          ...previous,
+          { role: "assistant", content: `Request failed: ${data.detail || "Unknown error"}` },
         ]);
-      } else {
-        const data = await res.json();
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: data.reply },
-        ]);
+        return;
       }
+
+      setSessionId(data.session_id);
+      setMessages((previous) => [...previous, { role: "assistant", content: data.reply }]);
+      await fetchWorkflowState(data.session_id);
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "网络错误，请检查后端是否启动" },
+      setMessages((previous) => [
+        ...previous,
+        { role: "assistant", content: "Network error while sending the message." },
       ]);
     } finally {
       setLoading(false);
     }
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+  async function handleApproval(decision: "approved" | "rejected") {
+    if (!sessionId || loading) return;
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/chat/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          approval_response: decision,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        setMessages((previous) => [
+          ...previous,
+          { role: "assistant", content: `Resume failed: ${data.detail || "Unknown error"}` },
+        ]);
+        return;
+      }
+
+      setMessages((previous) => [...previous, { role: "assistant", content: data.reply }]);
+      await fetchWorkflowState(sessionId);
+    } catch {
+      setMessages((previous) => [
+        ...previous,
+        { role: "assistant", content: "Network error while resuming the workflow." },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void handleSend();
     }
   }
 
   return (
-    <div className="flex h-screen bg-gray-100">
-      {/* 侧边栏 */}
-      <aside className="w-64 bg-white border-r flex flex-col p-4 gap-4">
-        <h1 className="text-lg font-bold text-gray-800">RAG 问答系统</h1>
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.18),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(244,114,182,0.16),_transparent_24%),linear-gradient(180deg,_#050816_0%,_#0f172a_45%,_#020617_100%)] text-slate-100">
+      <div className="mx-auto grid min-h-screen max-w-[1700px] gap-4 p-4 lg:grid-cols-[280px_minmax(0,1fr)_360px]">
+        <DocumentSidebar
+          documents={documents}
+          selectedDocId={selectedDocId}
+          uploadError={uploadError}
+          uploading={uploading}
+          fileInputRef={fileInputRef}
+          onFileChange={handleUpload}
+          onSelectDocument={setSelectedDocId}
+        />
 
-        {/* 上传 */}
-        <div>
-          <p className="text-sm font-medium text-gray-600 mb-2">上传文档</p>
-          <label className="flex items-center justify-center w-full h-10 rounded-lg border-2 border-dashed border-gray-300 cursor-pointer hover:border-blue-400 transition-colors">
-            <span className="text-sm text-gray-500">
-              {uploading ? "上传中..." : "选择 PDF / Word"}
-            </span>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.doc,.docx"
-              className="hidden"
-              onChange={handleUpload}
-              disabled={uploading}
-            />
-          </label>
-          {uploadError && (
-            <p className="text-xs text-red-500 mt-1">{uploadError}</p>
-          )}
-        </div>
+        <ChatPanel
+          input={input}
+          loading={loading}
+          messages={messages}
+          sessionId={sessionId}
+          workflowStatus={workflowState?.workflow_status}
+          messagesEndRef={messagesEndRef}
+          onInputChange={setInput}
+          onKeyDown={handleKeyDown}
+          onSend={() => void handleSend()}
+          statusLabel={statusLabel}
+          statusTone={statusTone}
+        />
 
-        {/* 文档列表 */}
-        <div className="flex-1 overflow-y-auto">
-          <p className="text-sm font-medium text-gray-600 mb-2">已上传文档</p>
-          {documents.length === 0 ? (
-            <p className="text-xs text-gray-400">暂无文档</p>
-          ) : (
-            <ul className="space-y-1">
-              {documents.map((doc) => (
-                <li key={doc.document_id}>
-                  <button
-                    onClick={() => setSelectedDocId(doc.document_id)}
-                    className={`w-full text-left text-sm px-3 py-2 rounded-lg truncate transition-colors ${
-                      selectedDocId === doc.document_id
-                        ? "bg-blue-100 text-blue-700 font-medium"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
-                    title={doc.filename}
-                  >
-                    {doc.filename}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* 当前选中 */}
-        <div className="text-xs text-gray-400 border-t pt-2">
-          {selectedDocId
-            ? `当前：${documents.find((d) => d.document_id === selectedDocId)?.filename}`
-            : "未选择文档（全局对话）"}
-        </div>
-      </aside>
-
-      {/* 主区域 */}
-      <main className="flex flex-col flex-1">
-        {/* 消息列表 */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {messages.length === 0 && (
-            <div className="flex items-center justify-center h-full text-gray-400">
-              选择文档后开始提问
-            </div>
-          )}
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-            >
-              <div
-                className={`max-w-2xl px-4 py-3 rounded-2xl text-sm whitespace-pre-wrap leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-blue-500 text-white rounded-br-sm"
-                    : "bg-white text-gray-800 shadow-sm rounded-bl-sm"
-                }`}
-              >
-                {msg.content}
-              </div>
-            </div>
-          ))}
-          {loading && (
-            <div className="flex justify-start">
-              <div className="bg-white px-4 py-3 rounded-2xl rounded-bl-sm shadow-sm text-sm text-gray-400">
-                思考中...
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* 输入框 */}
-        <div className="border-t bg-white p-4">
-          <div className="flex gap-3 items-end max-w-4xl mx-auto">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="输入问题，Enter 发送，Shift+Enter 换行"
-              rows={2}
-              className="flex-1 resize-none border rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-            />
-            <button
-              onClick={handleSend}
-              disabled={loading || !input.trim()}
-              className="h-10 px-5 bg-blue-500 text-white rounded-xl text-sm font-medium hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              发送
-            </button>
-          </div>
-        </div>
-      </main>
+        <WorkflowSidebar
+          loading={loading}
+          workflowState={workflowState}
+          onApprove={() => void handleApproval("approved")}
+          onReject={() => void handleApproval("rejected")}
+          statusLabel={statusLabel}
+          statusTone={statusTone}
+        />
+      </div>
     </div>
   );
 }

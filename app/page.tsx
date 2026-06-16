@@ -64,6 +64,9 @@ export default function Home() {
             messages={messages}
             sessionId={sessionId}
             workflowStatus={workflowState?.workflow_status}
+            workflowTrace={workflowState?.workflow_trace}
+            pendingApprovalGroup={workflowState?.pending_approval_group}
+            reviewReason={workflowState?.review_reason}
             messagesEndRef={messagesEndRef}
             onInputChange={setInput}
             onKeyDown={handleKeyDown}

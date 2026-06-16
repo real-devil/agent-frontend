@@ -1,6 +1,7 @@
 ﻿import type { RefObject } from "react";
 
-import type { Message } from "../types";
+import type { Message, TraceEvent } from "../types";
+import { formatValue } from "./workflow-utils";
 
 type ChatPanelProps = {
   input: string;
@@ -8,6 +9,9 @@ type ChatPanelProps = {
   messages: Message[];
   sessionId: string;
   workflowStatus?: string;
+  workflowTrace?: TraceEvent[];
+  pendingApprovalGroup?: string;
+  reviewReason?: string;
   messagesEndRef: RefObject<HTMLDivElement | null>;
   onInputChange: (value: string) => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -16,12 +20,83 @@ type ChatPanelProps = {
   statusTone: (status?: string) => string;
 };
 
+function WorkflowProgressCard({
+  workflowStatus,
+  workflowTrace,
+  pendingApprovalGroup,
+  reviewReason,
+}: {
+  workflowStatus?: string;
+  workflowTrace?: TraceEvent[];
+  pendingApprovalGroup?: string;
+  reviewReason?: string;
+}) {
+  const latestTrace = workflowTrace?.at(-1);
+  const recentTrace = workflowTrace?.slice(-3) || [];
+
+  return (
+    <div className="max-w-3xl rounded-3xl rounded-bl-md border border-sky-300/20 bg-slate-950/75 px-5 py-4 text-sm text-slate-200 shadow-lg">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.25em] text-sky-200/60">Workflow Progress</p>
+          <p className="mt-2 text-sm font-medium text-slate-100">
+            {workflowStatus === "awaiting_approval"
+              ? `Waiting for approval for group ${pendingApprovalGroup || "?"}`
+              : `${workflowStatus || "in_progress"}`}
+          </p>
+        </div>
+        {latestTrace ? (
+          <span className="rounded-full border border-sky-300/20 bg-sky-400/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-sky-100">
+            {latestTrace.node}
+          </span>
+        ) : null}
+      </div>
+
+      {reviewReason ? <p className="mt-3 text-sm text-slate-300">{reviewReason}</p> : null}
+
+      {recentTrace.length > 0 ? (
+        <div className="mt-4 space-y-3">
+          {recentTrace.map((trace, index) => {
+            const isLatest = index === recentTrace.length - 1;
+            return (
+              <div
+                key={`${trace.node}-${trace.event_type}-${index}`}
+                className={`rounded-2xl border p-3 text-xs transition ${
+                  isLatest
+                    ? "border-sky-300/30 bg-sky-400/10 text-sky-50"
+                    : "border-white/10 bg-white/5 text-slate-300"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium uppercase tracking-[0.18em]">{trace.event_type}</span>
+                  <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-slate-400">
+                    {isLatest ? <span className="rounded-full bg-sky-300/20 px-2 py-1 text-sky-100">Latest</span> : null}
+                    <span>{trace.node}</span>
+                  </span>
+                </div>
+                <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-2xl bg-slate-950/70 p-3 text-xs text-slate-400">
+                  {formatValue(trace.detail)}
+                </pre>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-4 text-xs text-slate-400">Preparing the workflow trace...</p>
+      )}
+    </div>
+  );
+}
+
 export function ChatPanel({
   input,
   loading,
   messages,
   sessionId,
   workflowStatus,
+  workflowTrace,
+  pendingApprovalGroup,
+  reviewReason,
   messagesEndRef,
   onInputChange,
   onKeyDown,
@@ -73,9 +148,12 @@ export function ChatPanel({
             ))}
             {loading ? (
               <div className="flex justify-start">
-                <div className="rounded-3xl rounded-bl-md border border-white/10 bg-white/8 px-5 py-4 text-sm text-slate-300">
-                  Working through the workflow...
-                </div>
+                <WorkflowProgressCard
+                  workflowStatus={workflowStatus}
+                  workflowTrace={workflowTrace}
+                  pendingApprovalGroup={pendingApprovalGroup}
+                  reviewReason={reviewReason}
+                />
               </div>
             ) : null}
           </div>

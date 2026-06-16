@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { DocumentItem, Message, TraceEvent, WorkflowState } from "../types";
+import type { ApprovalDecision, DocumentItem, Message, TraceEvent, WorkflowState } from "../types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
@@ -150,7 +150,7 @@ export function useAgentWorkflow() {
   }, [messages]);
 
   useEffect(() => {
-    if (!sessionId || !streamingAvailable) return;
+    if (!sessionId) return;
 
     void fetchWorkflowState(sessionId);
     const timer = setInterval(() => {
@@ -158,7 +158,17 @@ export function useAgentWorkflow() {
     }, 2500);
 
     return () => clearInterval(timer);
-  }, [fetchWorkflowState, sessionId, streamingAvailable]);
+  }, [fetchWorkflowState, sessionId]);
+
+  const resetSession = useCallback(() => {
+    setMessages([]);
+    setInput("");
+    setSessionId("");
+    setWorkflowState(null);
+    setUploadError("");
+    setLoading(false);
+    setStreamingAvailable(true);
+  }, []);
 
   const handleUpload = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -261,7 +271,7 @@ export function useAgentWorkflow() {
   }, [consumeSseResponse, fetchWorkflowState, input, loading, selectedDocId, sessionId]);
 
   const handleApproval = useCallback(
-    async (decision: "approved" | "rejected") => {
+    async (decision: ApprovalDecision) => {
       if (!sessionId || loading) return;
 
       setLoading(true);
@@ -350,5 +360,6 @@ export function useAgentWorkflow() {
     handleKeyDown,
     handleSend,
     handleUpload,
+    resetSession,
   };
 }

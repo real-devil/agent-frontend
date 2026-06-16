@@ -61,3 +61,5 @@ export type WorkflowState = {
   artifacts?: Record<string, ArtifactRecord>;
   metrics_summary?: MetricsSummary;
 };
+
+export type ApprovalDecision = "approved" | "rejected";

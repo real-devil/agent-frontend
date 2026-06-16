@@ -1,42 +1,67 @@
-﻿import type { ArtifactRecord, MetricsSummary, TraceEvent, WorkflowState, WorkflowStep } from "../types";
+﻿import { useMemo, useState } from "react";
+
+import type { ApprovalDecision, ArtifactRecord, MetricsSummary, TraceEvent, WorkflowState, WorkflowStep } from "../types";
 import { formatDuration, formatValue } from "./workflow-utils";
 
 type WorkflowSidebarProps = {
   loading: boolean;
   workflowState: WorkflowState | null;
-  onApprove: () => void;
-  onReject: () => void;
+  onApprove: (decision: ApprovalDecision) => void;
+  onReject: (decision: ApprovalDecision) => void;
   statusLabel: (status?: string) => string;
   statusTone: (status?: string) => string;
+};
+
+type ApprovalCardProps = {
+  loading: boolean;
+  pendingApprovalGroup?: string;
+  pendingSteps: WorkflowStep[];
+  onApprove: (decision: ApprovalDecision) => void;
+  onReject: (decision: ApprovalDecision) => void;
 };
 
 function ApprovalCard({
   loading,
   pendingApprovalGroup,
+  pendingSteps,
   onApprove,
   onReject,
-}: {
-  loading: boolean;
-  pendingApprovalGroup?: string;
-  onApprove: () => void;
-  onReject: () => void;
-}) {
+}: ApprovalCardProps) {
   return (
     <div className="mt-5 rounded-3xl border border-amber-300/30 bg-amber-400/10 p-4">
       <p className="text-sm font-medium text-amber-100">Approval required</p>
       <p className="mt-2 text-sm text-amber-50/80">
         Group {pendingApprovalGroup} is waiting for approval.
       </p>
+      {pendingSteps.length > 0 ? (
+        <div className="mt-3 space-y-2 rounded-2xl border border-amber-200/20 bg-slate-950/40 p-3 text-xs text-amber-50/90">
+          {pendingSteps.map((step) => (
+            <div key={step.id} className="rounded-xl bg-white/5 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-amber-100">{step.id}</span>
+                <span className="rounded-full border border-amber-200/20 px-2 py-1 text-[10px] uppercase tracking-[0.15em] text-amber-50/70">
+                  {step.agent}
+                </span>
+              </div>
+              <p className="mt-2 text-amber-50/80">{step.goal}</p>
+              <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-amber-50/60">
+                <span className="rounded-full bg-white/6 px-2 py-1">group {step.parallel_group}</span>
+                <span className="rounded-full bg-white/6 px-2 py-1">output {step.output_key || "-"}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="mt-4 flex gap-2">
         <button
-          onClick={onApprove}
+          onClick={() => onApprove("approved")}
           disabled={loading}
           className="rounded-2xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-50"
         >
           Approve
         </button>
         <button
-          onClick={onReject}
+          onClick={() => onReject("rejected")}
           disabled={loading}
           className="rounded-2xl border border-rose-300/30 bg-rose-400/10 px-4 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-400/20 disabled:opacity-50"
         >
@@ -130,6 +155,22 @@ function PlanPanel({ plan }: { plan: WorkflowStep[] }) {
 }
 
 function ArtifactsPanel({ artifacts }: { artifacts: Record<string, ArtifactRecord> }) {
+  const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
+  const [copiedKey, setCopiedKey] = useState("");
+
+  function toggleExpanded(key: string) {
+    setExpandedKeys((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  }
+
+  async function handleCopy(key: string, artifact: ArtifactRecord) {
+    await navigator.clipboard.writeText(formatValue(artifact.data));
+    setCopiedKey(key);
+    window.setTimeout(() => setCopiedKey(""), 1200);
+  }
+
   return (
     <section className="rounded-3xl border border-white/8 bg-white/5 p-4">
       <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Artifacts</p>
@@ -137,20 +178,39 @@ function ArtifactsPanel({ artifacts }: { artifacts: Record<string, ArtifactRecor
         {Object.keys(artifacts).length === 0 ? (
           <p className="text-sm text-slate-500">Artifacts will accumulate as steps complete.</p>
         ) : (
-          Object.entries(artifacts).map(([key, artifact]) => (
-            <div key={key} className="rounded-2xl border border-white/8 bg-slate-900/60 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-medium text-slate-100">{key}</span>
-                <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-emerald-200">
-                  {artifact.artifact_type}
-                </span>
+          Object.entries(artifacts).map(([key, artifact]) => {
+            const expanded = Boolean(expandedKeys[key]);
+            return (
+              <div key={key} className="rounded-2xl border border-white/8 bg-slate-900/60 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-slate-100">{key}</span>
+                  <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-emerald-200">
+                    {artifact.artifact_type}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-slate-300">{artifact.summary}</p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => toggleExpanded(key)}
+                    className="rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:bg-white/8"
+                  >
+                    {expanded ? "Collapse" : "Expand"}
+                  </button>
+                  <button
+                    onClick={() => void handleCopy(key, artifact)}
+                    className="rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:bg-white/8"
+                  >
+                    {copiedKey === key ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                {expanded ? (
+                  <pre className="mt-3 overflow-x-auto rounded-2xl bg-slate-950/70 p-3 text-xs text-slate-400 whitespace-pre-wrap">
+                    {formatValue(artifact.data)}
+                  </pre>
+                ) : null}
               </div>
-              <p className="mt-2 text-sm text-slate-300">{artifact.summary}</p>
-              <pre className="mt-3 overflow-x-auto rounded-2xl bg-slate-950/70 p-3 text-xs text-slate-400 whitespace-pre-wrap">
-                {formatValue(artifact.data)}
-              </pre>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </section>
@@ -158,6 +218,7 @@ function ArtifactsPanel({ artifacts }: { artifacts: Record<string, ArtifactRecor
 }
 
 function TracePanel({ trace }: { trace: TraceEvent[] }) {
+  const latestIndex = trace.length - 1;
   return (
     <section className="rounded-3xl border border-white/8 bg-white/5 p-4">
       <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Workflow Trace</p>
@@ -165,17 +226,30 @@ function TracePanel({ trace }: { trace: TraceEvent[] }) {
         {trace.length === 0 ? (
           <p className="text-sm text-slate-500">Trace events will appear after workflow execution starts.</p>
         ) : (
-          trace.map((event, index) => (
-            <div key={`${event.node}-${event.event_type}-${index}`} className="rounded-2xl border border-white/8 bg-slate-900/60 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-medium text-slate-100">{event.event_type}</span>
-                <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{event.node}</span>
+          trace.map((event, index) => {
+            const isLatest = index === latestIndex;
+            return (
+              <div
+                key={`${event.node}-${event.event_type}-${index}`}
+                className={`rounded-2xl border p-3 transition ${
+                  isLatest
+                    ? "border-sky-300/60 bg-sky-400/10 shadow-[0_0_0_1px_rgba(125,211,252,0.15)]"
+                    : "border-white/8 bg-slate-900/60"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-slate-100">{event.event_type}</span>
+                  <span className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                    {isLatest ? <span className="rounded-full bg-sky-300/20 px-2 py-1 text-sky-100">Latest</span> : null}
+                    <span>{event.node}</span>
+                  </span>
+                </div>
+                <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-2xl bg-slate-950/70 p-3 text-xs text-slate-400">
+                  {formatValue(event.detail)}
+                </pre>
               </div>
-              <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-2xl bg-slate-950/70 p-3 text-xs text-slate-400">
-                {formatValue(event.detail)}
-              </pre>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </section>
@@ -191,11 +265,17 @@ export function WorkflowSidebar({
   statusTone,
 }: WorkflowSidebarProps) {
   const workflowStatus = workflowState?.workflow_status;
-  const plan = workflowState?.workflow_plan || [];
+  const plan = useMemo(() => workflowState?.workflow_plan || [], [workflowState?.workflow_plan]);
   const trace = workflowState?.workflow_trace || [];
   const artifacts = workflowState?.artifacts || {};
   const metrics = workflowState?.metrics_summary;
   const needsApproval = workflowStatus === "awaiting_approval";
+  const pendingGroup = workflowState?.pending_approval_group;
+
+  const pendingSteps = useMemo(
+    () => plan.filter((step) => String(step.parallel_group) === String(pendingGroup)),
+    [pendingGroup, plan],
+  );
 
   return (
     <aside className="rounded-[28px] border border-white/10 bg-slate-950/55 p-5 shadow-[0_20px_80px_rgba(15,23,42,0.35)] backdrop-blur">
@@ -213,6 +293,7 @@ export function WorkflowSidebar({
         <ApprovalCard
           loading={loading}
           pendingApprovalGroup={workflowState?.pending_approval_group}
+          pendingSteps={pendingSteps}
           onApprove={onApprove}
           onReject={onReject}
         />

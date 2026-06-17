@@ -39,9 +39,12 @@ function TraceDetailDrawer({
           <div className="flex items-start justify-between gap-4 border-b border-white/8 px-5 py-4">
             <div>
               <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Trace Detail</p>
-              <p className="mt-2 text-lg font-medium text-slate-100">{event.event_type}</p>
+              <p className="mt-2 text-lg font-medium text-slate-100">
+                {event.display_label || event.event_type}
+              </p>
               <p className="mt-1 text-sm text-slate-400">
-                {event.node} · event {index + 1}
+                {event.node}
+                {event.activity_kind ? ` · ${event.activity_kind}` : ""} · event {index + 1}
               </p>
             </div>
             <button
@@ -126,8 +129,13 @@ export function TraceTimeline({ trace }: TraceTimelineProps) {
                       aria-hidden
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-slate-100">{event.event_type}</span>
-                      <span className="mt-0.5 block truncate text-xs text-slate-500">{event.node}</span>
+                      <span className="block truncate text-sm font-medium text-slate-100">
+                        {event.display_label || event.event_type}
+                      </span>
+                      <span className="mt-0.5 block truncate text-xs text-slate-500">
+                        {event.activity_kind ? `${event.activity_kind} · ` : ""}
+                        {event.node}
+                      </span>
                     </span>
                     {isLatest ? (
                       <span className="shrink-0 rounded-full bg-sky-300/20 px-2 py-0.5 text-[10px] uppercase tracking-[0.15em] text-sky-100">

@@ -1,4 +1,4 @@
-import type { TraceEvent, WorkflowStep } from "../types";
+import type { ActivityKind, TraceEvent, WorkflowStep } from "../types";
 
 export type ActivityRowStatus = "done" | "active" | "pending" | "waiting" | "error";
 
@@ -8,6 +8,7 @@ export type ActivityRow = {
   hint?: string;
   status: ActivityRowStatus;
   indent: number;
+  kind?: ActivityKind;
 };
 
 type PlanStepDetail = {
@@ -16,12 +17,14 @@ type PlanStepDetail = {
   agent?: string;
   goal?: string;
   group?: number;
+  display_label?: string;
 };
 
 type GroupStepDetail = {
   step_id?: string;
   agent?: string;
   goal?: string;
+  display_label?: string;
 };
 
 const AGENT_LABELS: Record<string, string> = {
@@ -30,6 +33,22 @@ const AGENT_LABELS: Record<string, string> = {
   rag_agent: "Document Q&A",
   general_agent: "Analysis",
 };
+
+function inferActivityKind(eventType: string): ActivityKind {
+  if (eventType === "workflow_started" || eventType === "workflow_resumed") return "session";
+  if (eventType === "plan_created") return "plan";
+  if (eventType === "group_started" || eventType === "group_executed") return "parallel";
+  if (eventType.startsWith("step_")) return "step";
+  if (eventType.startsWith("tool_")) return "tool";
+  if (eventType.startsWith("approval_")) return "approval";
+  if (eventType === "review_completed") return "review";
+  if (eventType === "final_answer_created") return "synthesize";
+  return "system";
+}
+
+function activityKind(event: TraceEvent): ActivityKind {
+  return event.activity_kind ?? inferActivityKind(event.event_type);
+}
 
 function agentLabel(agent?: string) {
   if (!agent) return "Agent";
@@ -66,6 +85,17 @@ function formatToolLabel(toolName?: string) {
   return toolName.replace(/_/g, " ");
 }
 
+function eventLabel(event: TraceEvent, fallback: string) {
+  return event.display_label?.trim() || fallback;
+}
+
+function indentForKind(kind: ActivityKind, nested = false): number {
+  if (kind === "tool") return 2;
+  if (kind === "step" || kind === "plan") return nested ? 1 : 0;
+  if (kind === "parallel" && nested) return 1;
+  return 0;
+}
+
 function upsertRow(rows: ActivityRow[], row: ActivityRow) {
   const index = rows.findIndex((item) => item.key === row.key);
   if (index === -1) {
@@ -94,6 +124,7 @@ function setActiveRow(rows: ActivityRow[], key: string, patch?: Partial<Activity
     hint: patch?.hint,
     status,
     indent: patch?.indent ?? rows.find((row) => row.key === key)?.indent ?? 0,
+    kind: patch?.kind,
     ...patch,
   });
 }
@@ -102,13 +133,15 @@ function seedPlanRows(
   rows: ActivityRow[],
   steps: PlanStepDetail[],
   routeReason?: string,
+  planLabel?: string,
 ) {
   upsertRow(rows, {
     key: "plan",
-    label: `Planned ${steps.length} step${steps.length === 1 ? "" : "s"}`,
+    label: planLabel || `Planned ${steps.length} step${steps.length === 1 ? "" : "s"}`,
     hint: routeReason ? truncate(routeReason, 96) : undefined,
     status: "done",
     indent: 0,
+    kind: "plan",
   });
 
   for (const step of steps) {
@@ -116,9 +149,10 @@ function seedPlanRows(
     if (!stepId) continue;
     upsertRow(rows, {
       key: planRowKey(stepId),
-      label: formatStepLabel(step.agent, step.goal, stepId),
+      label: step.display_label || formatStepLabel(step.agent, step.goal, stepId),
       status: "pending",
       indent: 1,
+      kind: "plan",
     });
   }
 }
@@ -132,6 +166,7 @@ function applyWorkflowPlan(rows: ActivityRow[], plan: WorkflowStep[]) {
       agent: step.agent,
       goal: step.goal,
       group: step.parallel_group,
+      display_label: formatStepLabel(step.agent, step.goal, step.id),
     })),
   );
 }
@@ -155,31 +190,42 @@ export function buildActivityRows(
   for (let eventIndex = 0; eventIndex < trace.length; eventIndex += 1) {
     const event = trace[eventIndex];
     const detail = event.detail;
+    const kind = activityKind(event);
 
     switch (event.event_type) {
       case "workflow_started":
         upsertRow(rows, {
           key: "start",
-          label: options.userMessage
-            ? `Received: ${truncate(options.userMessage, 64)}`
-            : "Workflow started",
+          label: eventLabel(
+            event,
+            options.userMessage
+              ? `Received: ${truncate(options.userMessage, 64)}`
+              : "Workflow started",
+          ),
           status: "done",
           indent: 0,
+          kind,
         });
         break;
 
       case "workflow_resumed":
         upsertRow(rows, {
           key: "resume",
-          label: "Resumed after approval",
+          label: eventLabel(event, "Resumed after approval"),
           status: "done",
           indent: 0,
+          kind,
         });
         break;
 
       case "plan_created": {
         const steps = (detail.steps as PlanStepDetail[] | undefined) || [];
-        seedPlanRows(rows, steps, String(detail.route_reason || options.routeReason || ""));
+        seedPlanRows(
+          rows,
+          steps,
+          String(detail.route_reason || options.routeReason || ""),
+          event.display_label,
+        );
         break;
       }
 
@@ -190,18 +236,20 @@ export function buildActivityRows(
         if (steps.length > 1) {
           upsertRow(rows, {
             key: `parallel:${groupId}`,
-            label: `Running ${steps.length} steps in parallel`,
+            label: eventLabel(event, `Running ${steps.length} steps in parallel`),
             status: "active",
             indent: 0,
+            kind,
           });
           for (const step of steps) {
             const stepId = String(step.step_id || "");
             if (!stepId) continue;
             upsertRow(rows, {
               key: stepKey(stepId),
-              label: formatStepLabel(step.agent, step.goal, stepId),
+              label: step.display_label || formatStepLabel(step.agent, step.goal, stepId),
               status: "active",
               indent: 1,
+              kind: "step",
             });
           }
         }
@@ -212,9 +260,10 @@ export function buildActivityRows(
         const groupId = String(detail.group_id ?? "group");
         upsertRow(rows, {
           key: `parallel:${groupId}`,
-          label: `Parallel group ${groupId} completed`,
+          label: eventLabel(event, `Parallel group ${groupId} completed`),
           status: "done",
           indent: 0,
+          kind,
         });
         break;
       }
@@ -222,22 +271,21 @@ export function buildActivityRows(
       case "step_started": {
         const stepId = String(detail.step_id || "");
         if (!stepId) break;
-        const label = formatStepLabel(
-          String(detail.agent || ""),
-          String(detail.goal || ""),
-          stepId,
+        const label = eventLabel(
+          event,
+          formatStepLabel(String(detail.agent || ""), String(detail.goal || ""), stepId),
         );
-        const inParallel = rows.some(
-          (row) => row.key === `parallel:${detail.parallel_group}` || row.key.startsWith("parallel:"),
-        );
+        const inParallel = rows.some((row) => row.key.startsWith("parallel:"));
+        const indent = inParallel ? 1 : indentForKind(kind);
         if (!inParallel) {
-          setActiveRow(rows, stepKey(stepId), { label, indent: 0 });
+          setActiveRow(rows, stepKey(stepId), { label, indent, kind });
         } else {
           upsertRow(rows, {
             key: stepKey(stepId),
             label,
             status: "active",
-            indent: 1,
+            indent,
+            kind,
           });
         }
         upsertRow(rows, {
@@ -245,6 +293,7 @@ export function buildActivityRows(
           label,
           status: "active",
           indent: 1,
+          kind,
         });
         break;
       }
@@ -252,25 +301,27 @@ export function buildActivityRows(
       case "step_completed": {
         const stepId = String(detail.step_id || "");
         if (!stepId) break;
-        upsertRow(rows, {
-          key: stepKey(stepId),
-          label: formatStepLabel(
+        const label = eventLabel(
+          event,
+          formatStepLabel(
             String(detail.agent || ""),
             String(detail.summary || detail.goal || ""),
             stepId,
           ),
+        );
+        upsertRow(rows, {
+          key: stepKey(stepId),
+          label,
           status: "done",
-          indent: rows.find((row) => row.key === stepKey(stepId))?.indent ?? 0,
+          indent: rows.find((row) => row.key === stepKey(stepId))?.indent ?? indentForKind(kind),
+          kind,
         });
         upsertRow(rows, {
           key: planRowKey(stepId),
-          label: formatStepLabel(
-            String(detail.agent || ""),
-            String(detail.summary || detail.goal || ""),
-            stepId,
-          ),
+          label,
           status: "done",
           indent: 1,
+          kind,
         });
         break;
       }
@@ -281,10 +332,11 @@ export function buildActivityRows(
         toolCounter += 1;
         upsertRow(rows, {
           key: toolRowKey(stepId, toolName, toolCounter),
-          label: formatToolLabel(toolName),
+          label: eventLabel(event, formatToolLabel(toolName)),
           hint: detail.tool_args ? truncate(String(detail.tool_args), 80) : undefined,
           status: "active",
-          indent: 2,
+          indent: indentForKind(kind),
+          kind,
         });
         break;
       }
@@ -299,9 +351,10 @@ export function buildActivityRows(
         if (matchingKey) {
           upsertRow(rows, {
             key: matchingKey,
-            label: formatToolLabel(toolName),
+            label: eventLabel(event, formatToolLabel(toolName)),
             status: "done",
-            indent: 2,
+            indent: indentForKind(kind),
+            kind,
           });
         }
         break;
@@ -311,85 +364,103 @@ export function buildActivityRows(
         markPreviousActiveAsDone(rows);
         upsertRow(rows, {
           key: `approval:${detail.group_id}`,
-          label: `Waiting for approval · group ${detail.group_id}`,
+          label: eventLabel(event, `Waiting for approval · group ${detail.group_id}`),
           status: "waiting",
           indent: 0,
+          kind,
         });
         break;
 
       case "approval_granted":
         upsertRow(rows, {
           key: `approval:${detail.group_id}`,
-          label: `Approval granted · group ${detail.group_id}`,
+          label: eventLabel(event, `Approval granted · group ${detail.group_id}`),
           status: "done",
           indent: 0,
+          kind,
         });
         break;
 
       case "approval_rejected":
         upsertRow(rows, {
           key: `approval:${detail.group_id}`,
-          label: `Approval rejected · group ${detail.group_id}`,
+          label: eventLabel(event, `Approval rejected · group ${detail.group_id}`),
           status: "error",
           indent: 0,
+          kind,
         });
         break;
 
       case "approval_skipped":
         upsertRow(rows, {
           key: `approval:${detail.group_id}`,
-          label: "Approval not required",
+          label: eventLabel(event, "Approval not required"),
           status: "done",
           indent: 0,
+          kind,
         });
         break;
 
       case "review_completed":
         upsertRow(rows, {
           key: `review:${eventIndex}`,
-          label: `Review · ${String(detail.decision || "continue")}`,
+          label: eventLabel(event, `Review · ${String(detail.decision || "continue")}`),
           hint: detail.reason ? truncate(String(detail.reason), 96) : undefined,
           status: "done",
           indent: 0,
+          kind,
         });
         break;
 
       case "workflow_rolled_back":
         upsertRow(rows, {
           key: `rollback:${eventIndex}`,
-          label: "Rolled back to an earlier step",
+          label: eventLabel(event, "Rolled back to an earlier step"),
           hint: detail.rollback_target ? `Target: ${detail.rollback_target}` : undefined,
           status: "waiting",
           indent: 0,
+          kind,
         });
         break;
 
       case "group_advanced":
         upsertRow(rows, {
           key: `advance:${detail.next_group_index}`,
-          label: `Advanced to group ${detail.next_group_index}`,
+          label: eventLabel(event, `Advanced to group ${detail.next_group_index}`),
           status: "done",
           indent: 0,
+          kind,
         });
         break;
 
       case "final_answer_created":
         setActiveRow(rows, "synthesize", {
-          label: "Composing final answer",
+          label: eventLabel(event, "Composing final answer"),
           indent: 0,
+          kind,
         });
         break;
 
       case "workflow_timed_out":
         upsertRow(rows, {
           key: "timeout",
-          label: "Workflow timed out",
+          label: eventLabel(event, "Workflow timed out"),
           status: "error",
           indent: 0,
+          kind,
         });
         break;
 
       default:
+        if (event.display_label) {
+          upsertRow(rows, {
+            key: `generic:${eventIndex}`,
+            label: event.display_label,
+            status: options.loading ? "active" : "done",
+            indent: indentForKind(kind),
+            kind,
+          });
+        }
         break;
     }
   }
@@ -400,8 +471,9 @@ export function buildActivityRows(
       const last = trace.at(-1);
       if (last) {
         setActiveRow(rows, `fallback:${trace.length}`, {
-          label: `${last.node} · ${last.event_type.replace(/_/g, " ")}`,
+          label: eventLabel(last, `${last.node} · ${last.event_type.replace(/_/g, " ")}`),
           indent: 0,
+          kind: activityKind(last),
         });
       }
     }
@@ -415,6 +487,7 @@ export function buildActivityRows(
       label: "Preparing workflow",
       status: "active",
       indent: 0,
+      kind: "system",
     });
   }
 
@@ -423,6 +496,8 @@ export function buildActivityRows(
 
 export function summarizeActivity(rows: ActivityRow[]) {
   const done = rows.filter((row) => row.status === "done").length;
-  const total = rows.filter((row) => row.indent === 0 || row.key.startsWith("plan:") || row.key.startsWith("step:")).length;
+  const total = rows.filter(
+    (row) => row.indent === 0 || row.key.startsWith("plan:") || row.key.startsWith("step:"),
+  ).length;
   return { done, total: Math.max(total, rows.length) };
 }

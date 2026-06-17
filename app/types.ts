@@ -23,10 +23,23 @@ export type ArtifactRecord = {
   data: unknown;
 };
 
+export type ActivityKind =
+  | "session"
+  | "plan"
+  | "parallel"
+  | "step"
+  | "tool"
+  | "approval"
+  | "review"
+  | "synthesize"
+  | "system";
+
 export type TraceEvent = {
   event_type: string;
   node: string;
   turn_id?: string;
+  display_label?: string;
+  activity_kind?: ActivityKind;
   detail: Record<string, unknown>;
 };
 

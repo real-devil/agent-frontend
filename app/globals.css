@@ -30,7 +30,8 @@ dialog::backdrop {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-pulse {
+  .animate-pulse,
+  .animate-ping {
     animation: none;
   }
 }

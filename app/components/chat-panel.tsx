@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
 
 import type { ConversationTurn, TraceEvent } from "../types";
+import { WorkflowActivityFeed } from "./workflow-activity-feed";
 
 type ChatPanelProps = {
   chatError: string;
@@ -20,26 +21,19 @@ type ChatPanelProps = {
   statusTone: (status?: string) => string;
 };
 
-function AssistantReplySkeleton() {
-  return (
-    <div className="max-w-3xl animate-pulse space-y-2.5 rounded-3xl rounded-bl-md border border-white/10 bg-white/8 px-5 py-4">
-      <div className="h-3 w-3/4 rounded bg-white/10" />
-      <div className="h-3 w-full rounded bg-white/10" />
-      <div className="h-3 w-5/6 rounded bg-white/10" />
-    </div>
-  );
-}
-
 function TurnMessages({
   turn,
   loading,
-  latestTrace,
+  liveTrace,
 }: {
   turn: ConversationTurn;
   loading: boolean;
-  latestTrace?: TraceEvent;
+  liveTrace?: TraceEvent[];
 }) {
   const isEmptyReply = !turn.reply?.trim();
+  const trace = turn.workflow_trace?.length ? turn.workflow_trace : liveTrace || [];
+  const hasActivity = trace.length > 0 || loading;
+  const showActivity = hasActivity && (loading || !isEmptyReply);
 
   return (
     <div className="space-y-3">
@@ -49,26 +43,32 @@ function TurnMessages({
         </div>
       </div>
 
-      <div className="flex justify-start">
-        {isEmptyReply && loading ? (
-          <div className="max-w-3xl space-y-2">
-            <AssistantReplySkeleton />
-            {latestTrace ? (
-              <p className="px-1 text-xs text-slate-500">
-                {latestTrace.node} · {latestTrace.event_type}
-              </p>
-            ) : null}
-          </div>
-        ) : (
+      {showActivity ? (
+        <div className="flex justify-start">
+          <WorkflowActivityFeed
+            trace={trace}
+            workflowPlan={turn.workflow_plan}
+            routeReason={turn.route_reason}
+            userMessage={turn.user_message}
+            loading={loading && isEmptyReply}
+            collapsed={!isEmptyReply}
+          />
+        </div>
+      ) : null}
+
+      {!isEmptyReply ? (
+        <div className="flex justify-start">
           <div className="max-w-3xl rounded-3xl rounded-bl-md border border-white/10 bg-white/8 px-5 py-4 text-sm leading-7 text-slate-100">
-            {isEmptyReply ? (
-              <span className="text-slate-400">Awaiting workflow output.</span>
-            ) : (
-              turn.reply
-            )}
+            {turn.reply}
           </div>
-        )}
-      </div>
+        </div>
+      ) : !loading ? (
+        <div className="flex justify-start">
+          <div className="max-w-3xl rounded-3xl rounded-bl-md border border-white/10 bg-white/8 px-5 py-4 text-sm leading-7 text-slate-100">
+            <span className="text-slate-400">Awaiting workflow output.</span>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -78,7 +78,7 @@ function TurnGroup({
   index,
   selected,
   loading,
-  latestTrace,
+  liveTrace,
   onSelectTurn,
   statusLabel,
   statusTone,
@@ -87,7 +87,7 @@ function TurnGroup({
   index: number;
   selected: boolean;
   loading: boolean;
-  latestTrace?: TraceEvent;
+  liveTrace?: TraceEvent[];
   onSelectTurn: (turnId: string) => void;
   statusLabel: (status?: string) => string;
   statusTone: (status?: string) => string;
@@ -115,7 +115,7 @@ function TurnGroup({
       </button>
 
       <div className="px-2 pb-3">
-        <TurnMessages turn={turn} loading={loading} latestTrace={loading ? latestTrace : undefined} />
+        <TurnMessages turn={turn} loading={loading} liveTrace={loading ? liveTrace : undefined} />
       </div>
     </div>
   );
@@ -171,7 +171,7 @@ export function ChatPanel({
                 index={index}
                 selected={turn.turn_id === selectedTurnId}
                 loading={loading && index === turns.length - 1}
-                latestTrace={workflowTrace?.at(-1)}
+                liveTrace={workflowTrace}
                 onSelectTurn={onSelectTurn}
                 statusLabel={statusLabel}
                 statusTone={statusTone}

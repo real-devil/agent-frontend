@@ -22,7 +22,7 @@ export function DocumentSidebar({
   onSelectDocument,
 }: DocumentSidebarProps) {
   return (
-    <aside className="rounded-[28px] border border-white/10 bg-slate-950/55 p-5 shadow-[0_20px_80px_rgba(15,23,42,0.35)] backdrop-blur">
+    <aside className="flex h-full min-h-0 flex-col rounded-[28px] border border-white/10 bg-slate-950/55 p-5 shadow-[0_20px_80px_rgba(15,23,42,0.35)] backdrop-blur">
       <div className="mb-6">
         <p className="text-xs uppercase tracking-[0.35em] text-sky-200/70">Documents</p>
         <h1 className="mt-2 text-2xl font-semibold text-white">Agent Console</h1>
@@ -47,12 +47,12 @@ export function DocumentSidebar({
         {uploadError ? <p className="mt-3 text-xs text-rose-300">{uploadError}</p> : null}
       </div>
 
-      <div className="mt-5 flex-1">
+      <div className="mt-5 flex min-h-0 flex-1 flex-col">
         <div className="mb-3 flex items-center justify-between">
           <p className="text-sm font-medium text-slate-200">Available documents</p>
           <span className="text-xs text-slate-500">{documents.length}</span>
         </div>
-        <div className="space-y-2 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
           {documents.length === 0 ? (
             <div className="rounded-2xl border border-white/8 bg-white/5 p-4 text-sm text-slate-500">
               No documents uploaded yet.

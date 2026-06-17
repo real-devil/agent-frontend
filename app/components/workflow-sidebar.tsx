@@ -1,11 +1,21 @@
-﻿import { useMemo, useState } from "react";
+import { useState } from "react";
 
-import type { ApprovalDecision, ArtifactRecord, MetricsSummary, TraceEvent, WorkflowState, WorkflowStep } from "../types";
+import type {
+  ApprovalDecision,
+  ArtifactRecord,
+  ConversationTurn,
+  MetricsSummary,
+  WorkflowState,
+  WorkflowStep,
+} from "../types";
 import { formatDuration, formatValue } from "./workflow-utils";
+import { TraceTimeline } from "./trace-timeline";
 
 type WorkflowSidebarProps = {
   loading: boolean;
+  selectedTurnId: string;
   workflowState: WorkflowState | null;
+  onSelectTurn: (turnId: string) => void;
   onApprove: (decision: ApprovalDecision) => void;
   onReject: (decision: ApprovalDecision) => void;
   statusLabel: (status?: string) => string;
@@ -72,12 +82,70 @@ function ApprovalCard({
   );
 }
 
+function TurnListPanel({
+  turns,
+  selectedTurnId,
+  onSelectTurn,
+  statusLabel,
+  statusTone,
+}: {
+  turns: ConversationTurn[];
+  selectedTurnId: string;
+  onSelectTurn: (turnId: string) => void;
+  statusLabel: (status?: string) => string;
+  statusTone: (status?: string) => string;
+}) {
+  return (
+    <section className="rounded-3xl border border-white/8 bg-white/5 p-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Turns</p>
+        <span className="text-xs text-slate-500">{turns.length}</span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {turns.length === 0 ? (
+          <p className="text-sm text-slate-500">Turns will appear after the first request.</p>
+        ) : (
+          turns.map((turn, index) => {
+            const selected = turn.turn_id === selectedTurnId;
+            const artifactCount = Object.keys(turn.artifacts || {}).length;
+            return (
+              <button
+                key={turn.turn_id}
+                type="button"
+                onClick={() => onSelectTurn(turn.turn_id)}
+                className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
+                  selected
+                    ? "border-sky-300/30 bg-sky-400/10"
+                    : "border-white/8 bg-slate-900/60 hover:border-white/12 hover:bg-slate-900/80"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-slate-100">Turn {index + 1}</span>
+                  <span className={`rounded-full border px-2 py-1 text-[10px] ${statusTone(turn.status)}`}>
+                    {statusLabel(turn.status)}
+                  </span>
+                </div>
+                <p className="mt-2 line-clamp-2 text-sm text-slate-300">{turn.user_message}</p>
+                <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
+                  <span>{artifactCount} artifacts</span>
+                  <span>·</span>
+                  <span>{turn.workflow_trace?.length || 0} trace events</span>
+                </div>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
 function MetricsPanel({ metrics }: { metrics?: MetricsSummary }) {
   return (
     <section className="rounded-3xl border border-white/8 bg-white/5 p-4">
       <div className="flex items-center justify-between">
         <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Metrics</p>
-        <span className="text-xs text-slate-500">Live Summary</span>
+        <span className="text-xs text-slate-500">Turn Summary</span>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 text-sm text-slate-200">
         <div className="rounded-2xl bg-slate-900/60 p-3">
@@ -173,10 +241,13 @@ function ArtifactsPanel({ artifacts }: { artifacts: Record<string, ArtifactRecor
 
   return (
     <section className="rounded-3xl border border-white/8 bg-white/5 p-4">
-      <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Artifacts</p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Artifacts</p>
+        <span className="text-xs text-slate-500">{Object.keys(artifacts).length}</span>
+      </div>
       <div className="mt-3 space-y-3">
         {Object.keys(artifacts).length === 0 ? (
-          <p className="text-sm text-slate-500">Artifacts will accumulate as steps complete.</p>
+          <p className="text-sm text-slate-500">No artifacts for the selected turn.</p>
         ) : (
           Object.entries(artifacts).map(([key, artifact]) => {
             const expanded = Boolean(expandedKeys[key]);
@@ -204,7 +275,7 @@ function ArtifactsPanel({ artifacts }: { artifacts: Record<string, ArtifactRecor
                   </button>
                 </div>
                 {expanded ? (
-                  <pre className="mt-3 overflow-x-auto rounded-2xl bg-slate-950/70 p-3 text-xs text-slate-400 whitespace-pre-wrap">
+                  <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-2xl bg-slate-950/70 p-3 text-xs text-slate-400">
                     {formatValue(artifact.data)}
                   </pre>
                 ) : null}
@@ -217,68 +288,31 @@ function ArtifactsPanel({ artifacts }: { artifacts: Record<string, ArtifactRecor
   );
 }
 
-function TracePanel({ trace }: { trace: TraceEvent[] }) {
-  const latestIndex = trace.length - 1;
-  return (
-    <section className="rounded-3xl border border-white/8 bg-white/5 p-4">
-      <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Workflow Trace</p>
-      <div className="mt-3 space-y-3">
-        {trace.length === 0 ? (
-          <p className="text-sm text-slate-500">Trace events will appear after workflow execution starts.</p>
-        ) : (
-          trace.map((event, index) => {
-            const isLatest = index === latestIndex;
-            return (
-              <div
-                key={`${event.node}-${event.event_type}-${index}`}
-                className={`rounded-2xl border p-3 transition ${
-                  isLatest
-                    ? "border-sky-300/60 bg-sky-400/10 shadow-[0_0_0_1px_rgba(125,211,252,0.15)]"
-                    : "border-white/8 bg-slate-900/60"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-slate-100">{event.event_type}</span>
-                  <span className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                    {isLatest ? <span className="rounded-full bg-sky-300/20 px-2 py-1 text-sky-100">Latest</span> : null}
-                    <span>{event.node}</span>
-                  </span>
-                </div>
-                <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-2xl bg-slate-950/70 p-3 text-xs text-slate-400">
-                  {formatValue(event.detail)}
-                </pre>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </section>
-  );
-}
-
 export function WorkflowSidebar({
   loading,
+  selectedTurnId,
   workflowState,
+  onSelectTurn,
   onApprove,
   onReject,
   statusLabel,
   statusTone,
 }: WorkflowSidebarProps) {
   const workflowStatus = workflowState?.workflow_status;
-  const plan = useMemo(() => workflowState?.workflow_plan || [], [workflowState?.workflow_plan]);
-  const trace = workflowState?.workflow_trace || [];
-  const artifacts = workflowState?.artifacts || {};
-  const metrics = workflowState?.metrics_summary;
-  const needsApproval = workflowStatus === "awaiting_approval";
+  const turns = workflowState?.conversation_turns || [];
+  const selectedTurn = turns.find((turn) => turn.turn_id === selectedTurnId) || turns.at(-1);
+  const plan = selectedTurn?.workflow_plan || [];
+  const trace = selectedTurn?.workflow_trace || [];
+  const artifacts = selectedTurn?.artifacts || {};
+  const metrics = selectedTurn?.metrics_summary;
+  const needsApproval =
+    workflowStatus === "awaiting_approval" && selectedTurn?.turn_id === workflowState?.current_turn_id;
   const pendingGroup = workflowState?.pending_approval_group;
 
-  const pendingSteps = useMemo(
-    () => plan.filter((step) => String(step.parallel_group) === String(pendingGroup)),
-    [pendingGroup, plan],
-  );
+  const pendingSteps = plan.filter((step) => String(step.parallel_group) === String(pendingGroup));
 
   return (
-    <aside className="rounded-[28px] border border-white/10 bg-slate-950/55 p-5 shadow-[0_20px_80px_rgba(15,23,42,0.35)] backdrop-blur">
+    <aside className="flex h-full min-h-0 flex-col rounded-[28px] border border-white/10 bg-slate-950/55 p-5 shadow-[0_20px_80px_rgba(15,23,42,0.35)] backdrop-blur">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.35em] text-emerald-200/70">Workflow</p>
@@ -299,16 +333,24 @@ export function WorkflowSidebar({
         />
       ) : null}
 
-      <div className="mt-5 space-y-4 overflow-y-auto pr-1">
+      <div className="mt-5 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+        <TurnListPanel
+          turns={turns}
+          selectedTurnId={selectedTurnId}
+          onSelectTurn={onSelectTurn}
+          statusLabel={statusLabel}
+          statusTone={statusTone}
+        />
+
         <section className="rounded-3xl border border-white/8 bg-white/5 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Route Reason</p>
-          <p className="mt-2 text-sm text-slate-200">{workflowState?.route_reason || "No workflow yet."}</p>
+          <p className="mt-2 text-sm text-slate-200">{selectedTurn?.route_reason || "No selected turn yet."}</p>
         </section>
 
         <MetricsPanel metrics={metrics} />
         <PlanPanel plan={plan} />
         <ArtifactsPanel artifacts={artifacts} />
-        <TracePanel trace={trace} />
+        <TraceTimeline trace={trace} />
       </div>
     </aside>
   );

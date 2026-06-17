@@ -1,8 +1,3 @@
-﻿export type Message = {
-  role: "user" | "assistant";
-  content: string;
-};
-
 export type DocumentItem = {
   document_id: string;
   filename: string;
@@ -31,6 +26,7 @@ export type ArtifactRecord = {
 export type TraceEvent = {
   event_type: string;
   node: string;
+  turn_id?: string;
   detail: Record<string, unknown>;
 };
 
@@ -48,8 +44,25 @@ export type MetricsSummary = {
   failure_counts?: Record<string, number>;
 };
 
+export type ConversationTurn = {
+  turn_id: string;
+  user_message: string;
+  reply: string;
+  status?: string;
+  started_at?: number;
+  route_reason?: string;
+  review_decision?: string;
+  review_reason?: string;
+  pending_approval_group?: string;
+  workflow_plan?: WorkflowStep[];
+  workflow_trace?: TraceEvent[];
+  artifacts?: Record<string, ArtifactRecord>;
+  metrics_summary?: MetricsSummary;
+};
+
 export type WorkflowState = {
   session_id: string;
+  current_turn_id?: string;
   workflow_status?: string;
   route_reason?: string;
   current_group_index?: number;
@@ -60,6 +73,7 @@ export type WorkflowState = {
   workflow_trace?: TraceEvent[];
   artifacts?: Record<string, ArtifactRecord>;
   metrics_summary?: MetricsSummary;
+  conversation_turns?: ConversationTurn[];
 };
 
 export type ApprovalDecision = "approved" | "rejected";

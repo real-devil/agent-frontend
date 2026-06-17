@@ -35,7 +35,7 @@ function WorkflowProgressCard({
   const recentTrace = workflowTrace?.slice(-3) || [];
 
   return (
-    <div className="max-w-3xl rounded-3xl rounded-bl-md border border-sky-300/20 bg-slate-950/75 px-5 py-4 text-sm text-slate-200 shadow-lg">
+    <div className="max-w-3xl rounded-3xl rounded-bl-md border border-sky-300/20 bg-slate-950/75 px-5 py-4 text-sm text-slate-200">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-sky-200/60">Workflow Progress</p>
@@ -105,7 +105,7 @@ export function ChatPanel({
   statusTone,
 }: ChatPanelProps) {
   return (
-    <main className="flex min-h-[70vh] flex-col rounded-[30px] border border-white/10 bg-slate-950/45 shadow-[0_20px_80px_rgba(15,23,42,0.4)] backdrop-blur">
+    <main className="flex min-h-[70vh] flex-col rounded-[28px] border border-white/10 bg-slate-950/45 shadow-[0_20px_80px_rgba(15,23,42,0.4)] backdrop-blur">
       <div className="border-b border-white/8 px-6 py-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -136,7 +136,7 @@ export function ChatPanel({
                 className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-3xl rounded-3xl px-5 py-4 text-sm leading-7 shadow-lg ${
+                  className={`max-w-3xl rounded-3xl px-5 py-4 text-sm leading-7 ${
                     message.role === "user"
                       ? "rounded-br-md bg-sky-500 text-white"
                       : "rounded-bl-md border border-white/10 bg-white/8 text-slate-100"
@@ -169,7 +169,7 @@ export function ChatPanel({
             onKeyDown={onKeyDown}
             placeholder="Ask a question. Press Enter to send and Shift+Enter for a new line."
             rows={3}
-            className="min-h-[96px] flex-1 resize-none rounded-3xl border border-white/10 bg-slate-950/70 px-5 py-4 text-sm text-slate-100 outline-none transition focus:border-sky-400/60"
+            className="min-h-[96px] flex-1 resize-none rounded-3xl border border-white/10 bg-slate-950/70 px-5 py-4 text-sm text-slate-100 outline-none transition focus:border-sky-400/50 focus:ring-1 focus:ring-sky-400/20"
           />
           <button
             onClick={onSend}

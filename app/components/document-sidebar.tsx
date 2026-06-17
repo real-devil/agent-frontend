@@ -33,7 +33,7 @@ export function DocumentSidebar({
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <p className="text-sm font-medium text-slate-200">Upload PDF or Word</p>
-        <label className="mt-3 flex h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-slate-500/60 bg-slate-900/60 text-center text-sm text-slate-400 transition hover:border-sky-300/70 hover:text-slate-200">
+        <label className="mt-3 flex h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-slate-500/40 bg-slate-900/60 text-center text-sm text-slate-400 transition hover:border-sky-300/60 hover:text-slate-200">
           <span>{uploading ? "Uploading..." : "Choose a file"}</span>
           <input
             ref={fileInputRef}
